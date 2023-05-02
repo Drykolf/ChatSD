@@ -51,5 +51,5 @@ def StartServer():
         subClientThread = threading.Thread(target=SubClient, args=(clients,q,))
         subClientThread.start()
 
-if __name__ == '__main__':
+if __name__ == '__main__':#comentario
     StartServer()
