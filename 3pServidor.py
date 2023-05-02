@@ -3,7 +3,7 @@ import socket
 import threading
 import queue
 
-#CONSTANTES
+#CONSTANTES hOLA MUNDO
 TCP_IP = '127.0.0.1'
 TCP_PORT = 8888
 BUFFER_SIZE = 1024
