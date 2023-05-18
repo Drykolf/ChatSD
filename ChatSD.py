@@ -25,6 +25,7 @@ TCP_IP = "127.0.0.1"
 TCP_PORT = 8888
 BUFFER_SIZE = 1024
 DEFAULT_ROOM="Sala Principal"
+SCREENS =["Login","Register","Chat","Informacion","InformacionBoton"]
 
 class ScrollableLabel(ScrollView):
     def __init__(self, **kwargs):
@@ -51,7 +52,6 @@ class ScrollableLabel(ScrollView):
 class ChatPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        Window.bind(on_request_close=self.exit_check)
         self.username = "JBarco"
         self.room = DEFAULT_ROOM
         t = time.localtime()
@@ -77,12 +77,6 @@ class ChatPage(GridLayout):
         bottomLine.add_widget(self.sendBtn)
         self.add_widget(bottomLine)
         Window.bind(on_key_down=self.on_key_down)
-        
-        q = queue.Queue()
-
-    def exit_check(self, *args):
-        chatApp.ServerSocket.close()
-        return False
 
     def on_key_down(self, instance, keyboard, keycode, text, modifiers):
         if keycode == 40:
@@ -103,8 +97,11 @@ class ChatPage(GridLayout):
     def Focus_Text_Input(self, _):
         self.newMessageTxt.focus = True
 
-    def Incoming_Message(self, username, message):
-        self.historyLbl.Update_Chat_History(f"[color=20dd20]{username}[/color] > {message}")
+    def Incoming_Message(self, username, message, whisper = False):
+        if not whisper:
+            self.historyLbl.Update_Chat_History(f"[color=20dd20]{username}[/color] > {message}")
+        else:            
+            self.historyLbl.Update_Chat_History(f"[color=9b20dd]Mensaje privado de {username}[/color] > {message}")
 
     def Change_Room(self,message,room="Default"):
         #PENDIENTE ARREGLAR
@@ -147,6 +144,8 @@ class LoginPage(GridLayout):
         self.add_widget(self.signup)
         self.username = chatApp.username
     
+    def Register(self, instance):
+        return
     def Login(self, instance):
         self.username = self.userTxt.text
         info = f"Intentando iniciar como {self.username}"
@@ -154,17 +153,18 @@ class LoginPage(GridLayout):
         chatApp.ServerSocket.sendall(f"#login {self.username} {password}".encode("UTF-8"))
         print(info)
         chatApp.infoPage.Update_Info(info)
-        chatApp.screenManager.current = "Informacion"
-        Clock.schedule_once(self.Connect,1) #Esperar 1 seg para conectarse
+        chatApp.screenManager.current = SCREENS[3]
+        Clock.schedule_once(self.Connect,1)
     
-    def Connect(self,_): #El _ es por el metodo schedule
+    def Connect(self,_): 
         if(chatApp.logged):
+            chatApp.nextScreen = SCREENS[2]
             print("Sesion iniciada")
         else:
-            chatApp.infoPage.Update_Info("Error al iniciar")
-            chatApp.screenManager.current = "Informacion"
-            sleep(1)
-            chatApp.screenManager.current = "Login"
+            chatApp.nextScreen = SCREENS[0]
+            chatApp.infoBtnPage.Update_Info("Error al iniciar")
+            chatApp.screenManager.current = SCREENS[4]
+            
 
 
 class InfoPage(GridLayout):
@@ -180,34 +180,67 @@ class InfoPage(GridLayout):
 
     def Update_Text_Width(self, *_):
         self.messageLbl.text_size = (self.messageLbl.width*0.9,None)
+    
 
+class InfoButtonPage(InfoPage):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.exit=False
+        self.rows = 2
+        self.continueBtn = Button(text="OK",size_hint_y=.1,size_hint_x=0.2)
+        self.continueBtn.bind(on_press=self.trigger)
+        self.add_widget(self.continueBtn)
+    
+    def trigger(self, instance):
+        if self.exit: chatApp.End_Client()
+        else: self.Next_Screen()
+    def Next_Screen(self):
+        chatApp.screenManager.current = chatApp.nextScreen
 
 class ChatSD(App):
     def build(self):
+        Window.bind(on_request_close=self.exit_check)
+        self.closing = False
         #Variables de usuario
         self.username = "Invitado"
         self.logged = False
         self.screenManager = ScreenManager()
+        self.nextScreen = SCREENS[2]
         self.loginPage = LoginPage()
-        screen = Screen(name="Login")
+        screen = Screen(name=SCREENS[0])
         screen.add_widget(self.loginPage)
         self.screenManager.add_widget(screen)
         self.infoPage = InfoPage()
-        screen = Screen(name="Informacion")
+        screen = Screen(name=SCREENS[3])
         screen.add_widget(self.infoPage)
         self.screenManager.add_widget(screen)
         self.chatPage = ChatPage()
-        screen = Screen(name="Chat")
+        screen = Screen(name=SCREENS[2])
         screen.add_widget(self.chatPage)
         self.screenManager.add_widget(screen)
-        if not (self.Connect_Server()):App.get_running_app().stop()
+        self.infoBtnPage = InfoButtonPage()
+        screen = Screen(name=SCREENS[4])
+        screen.add_widget(self.infoBtnPage)
+        self.screenManager.add_widget(screen)
+        if not (self.Connect_Server()):
+            self.End_Client("----------------------Error en conexion--------------------------")
+            return
         #Hilo para escuchar servidor
         self.serverThread = threading.Thread(target=self.Listen_Server)
         self.serverThread.start()
-        self.screenManager.current = "Chat"
         return self.screenManager
+
+    def exit_check(self, *args):
+        self.End_Client("Desconectando...")
+        return False
     
-        #return self.chatPage()
+    def End_Client(self,message="Error"):
+        if(self.closing):return
+        print(message)
+        self.closing=True
+        self.ServerSocket.close()
+        App.get_running_app().stop()
+
     def Connect_Server(self):
         #Conexion
         self.ServerSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -216,8 +249,8 @@ class ChatSD(App):
             self.ServerSocket.setblocking(0)
             return True
         except:
-            print("----------------------Error en conexion--------------------------")
             return False
+        
     def Listen_Server(self):
         while True:
             ready = select.select([self.ServerSocket], [], [], 1)
@@ -228,16 +261,31 @@ class ChatSD(App):
                     self.chatPage.Change_Room("","Prueba")
                     print(data)
                 except:
-                    print("Servidor desconectado")
+                    input("Servidor desconectado")
+                    self.infoBtnPage.Update_Info("Error: Servidor desconectado"+ 
+                                "\n"+"Saliendo de la aplicacion")
+                    self.infoBtnPage.exit = True
+                    self.screenManager.current = SCREENS[4]
                     break
         return
         #finalizar
-    
+
     def Check_Message(self,data):
         listedData = data.split("»")
         command = listedData[0]
         results = ["Login","Mensaje","Entrar Sala","Salir Sala","Eliminar Sala","Desconectar",
-                   "Privado"]
+                   "Privado","noLogin"]
+        #register Nombres,Apellidos,Login,Password,Edad,Genero
+        #register Jose,Barco Arias,jbarco,1230,24,Hombre
+        #login usuario contrasena
+        #noLogin»Credenciales incorrectos
+        #Login»Iniciado sesion correctamente
+        #Mensaje»Klisman»HOla como esta
+        #Entrar Sala»Prueba»ha entrado a la sala prueba
+        #Salir Sala»Prueba»Ha salido de la sala
+        #Eliminar Sala»Prueba»Se ha eliminado sala Prueba
+        #Desconectar»Se ha desconectado
+        #Privado»Klisman»Hola como estax
         if(command == results[0]):#Iniciar sesion exitosamente
             self.logged = True
             self.username = self.loginPage.username
@@ -256,6 +304,15 @@ class ChatSD(App):
             room = listedData[1]
             message = listedData[2]
             self.chatPage.Delete_Room(message,room)
+        elif(command == results[5]):#Desconectar
+            self.End_Client("Saliendo de la aplicacion")
+        elif(command == results[6]):#Mensaje privado
+            sender = listedData[1]
+            message = listedData[2]
+            self.chatPage.Incoming_Message(sender,message,True)
+        elif(command == results[7]):#Login no aceptado
+            return
+            
 
 
 
