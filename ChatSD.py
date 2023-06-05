@@ -17,6 +17,8 @@ import socket
 import threading
 import queue
 import select
+from datetime import datetime
+from threading import Thread
 
 #CONSTANTES
 #TCP_IP = '192.168.86.44'
@@ -26,6 +28,37 @@ TCP_PORT = 8888
 BUFFER_SIZE = 1024
 DEFAULT_ROOM="Sala Principal"
 SCREENS =["Login","Register","Chat","Informacion","InformacionBoton"]
+
+class UnconventionalClock():
+    def __init__(self, hours=0, minutes=0, seconds=0):
+        self.hour = int(hours)
+        self.minute = int(minutes)
+        self.second = int(seconds)
+
+    def start(self):
+        self.tick()
+        return self._format()
+
+    def reset(self, hours=0, minutes=0, seconds=0, interval=1000):
+        self.interval = interval
+        self.hour = hours
+        self.minute = minutes
+        self.second = seconds
+
+    def tick(self):
+        self.second += 1
+        if self.second >= 60:
+            self.second = 0
+            self.minute += 1
+            if self.minute >= 60:
+                self.minute = 0
+                self.hour += 1
+                if self.hour >= 24:
+                    self.hour = 0
+
+    def Get_Time(self):
+        return "%02d:%02d:%02d" % (self.hour, self.minute, self.second)
+
 
 class ScrollableLabel(ScrollView):
     def __init__(self, **kwargs):
@@ -104,16 +137,15 @@ class ChatPage(GridLayout):
             self.historyLbl.Update_Chat_History(f"[color=9b20dd]Mensaje privado de {username}[/color] > {message}")
 
     def Change_Room(self,message,room="Default"):
-        #PENDIENTE ARREGLAR
-        if(room == "Default"):                
-            self.room = DEFAULT_ROOM
-        elif(self.room == room):
+        if(self.room == room):
             #Ya esta en esta sala
+            self.historyLbl.Update_Chat_History(f"Ya se encuentra en la sala")
             return
-        else: self.room = room
+        self.room = room
         self.roomNameLbl.text = room
         self.historyLbl.text = ""
         #mostrar mensaje del servidor
+        self.historyLbl.Update_Chat_History(message)
         #enviar mensaje de entrada a todos
         self.historyLbl.Update_Chat_History(f"[color=20dd20]{self.username}[/color] ha entrado a la sala")
     
@@ -150,23 +182,23 @@ class LoginPage(GridLayout):
         self.username = self.userTxt.text
         info = f"Intentando iniciar como {self.username}"
         password = self.passwordTxt.text
-        chatApp.ServerSocket.sendall(f"#login {self.username} {password}".encode("UTF-8"))
+        chatApp.ServerSocket.sendall(f"#login»{self.username}»{password}".encode("UTF-8"))
         print(info)
         chatApp.infoPage.Update_Info(info)
         chatApp.screenManager.current = SCREENS[3]
-        Clock.schedule_once(self.Connect,1)
+        self.Connect()
     
-    def Connect(self,_): 
-        if(chatApp.logged):
-            chatApp.nextScreen = SCREENS[2]
-            print("Sesion iniciada")
-        else:
-            chatApp.nextScreen = SCREENS[0]
-            chatApp.infoBtnPage.Update_Info("Error al iniciar")
-            chatApp.screenManager.current = SCREENS[4]
+    def Connect(self): 
+        for i in range(9):
+            if(chatApp.logged):
+                chatApp.nextScreen = SCREENS[2]
+                print("Sesion iniciada")
+                break
+            sleep(1)
+        chatApp.nextScreen = SCREENS[0]
+        chatApp.infoBtnPage.Update_Info("Error al iniciar")
+        chatApp.screenManager.current = SCREENS[4]
             
-
-
 class InfoPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -228,6 +260,7 @@ class ChatSD(App):
         #Hilo para escuchar servidor
         self.serverThread = threading.Thread(target=self.Listen_Server)
         self.serverThread.start()
+        self.screenManager.current = SCREENS[2]
         return self.screenManager
 
     def exit_check(self, *args):
@@ -239,7 +272,8 @@ class ChatSD(App):
         print(message)
         self.closing=True
         self.ServerSocket.close()
-        App.get_running_app().stop()
+        try:App.get_running_app().stop()
+        except:return
 
     def Connect_Server(self):
         #Conexion
@@ -257,15 +291,15 @@ class ChatSD(App):
             if ready[0]:
                 try:
                     data = self.ServerSocket.recv(BUFFER_SIZE).decode("UTF-8")
-                    self.chatPage.Incoming_Message("Alguien",data)
-                    self.chatPage.Change_Room("","Prueba")
+                    #self.chatPage.Incoming_Message("Alguien",data)
+                    #self.chatPage.Change_Room("","Prueba")
+                    self.Check_Message(data)
                     print(data)
                 except:
-                    input("Servidor desconectado")
                     self.infoBtnPage.Update_Info("Error: Servidor desconectado"+ 
                                 "\n"+"Saliendo de la aplicacion")
                     self.infoBtnPage.exit = True
-                    self.screenManager.current = SCREENS[4]
+                    self.End_Client()
                     break
         return
         #finalizar
@@ -274,7 +308,7 @@ class ChatSD(App):
         listedData = data.split("»")
         command = listedData[0]
         results = ["Login","Mensaje","Entrar Sala","Salir Sala","Eliminar Sala","Desconectar",
-                   "Privado","noLogin"]
+                   "Privado","Reloj"]
         #register Nombres,Apellidos,Login,Password,Edad,Genero
         #register Jose,Barco Arias,jbarco,1230,24,Hombre
         #login usuario contrasena
@@ -285,10 +319,11 @@ class ChatSD(App):
         #Salir Sala»Prueba»Ha salido de la sala
         #Eliminar Sala»Prueba»Se ha eliminado sala Prueba
         #Desconectar»Se ha desconectado
-        #Privado»Klisman»Hola como estax
-        if(command == results[0]):#Iniciar sesion exitosamente
-            self.logged = True
-            self.username = self.loginPage.username
+        #Privado»Klisman»Hola como esta
+        if(command == results[0]):#Login
+            if(listedData[1]=="1"):
+                self.logged = True
+                self.username = self.loginPage.username
         elif(command == results[1]):#Mostrar mensaje
             sender = listedData[1]
             message = listedData[2]
@@ -310,10 +345,16 @@ class ChatSD(App):
             sender = listedData[1]
             message = listedData[2]
             self.chatPage.Incoming_Message(sender,message,True)
-        elif(command == results[7]):#Login no aceptado
-            return
-            
+        elif(command == results[7]):#Reloj
+            clockThread = Thread(target=self.Server_Clock,args=listedData[1:])
+            clockThread.start()   
 
+    def Server_Clock(self,hour,min,sec):
+        serverClock = UnconventionalClock(hour,min,sec)
+        while not self.closing:
+            sleep(1)
+            serverClock.tick()
+            self.chatPage.serverTime.text = serverClock.Get_Time()
 
 
 
