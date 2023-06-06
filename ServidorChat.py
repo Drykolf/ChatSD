@@ -72,36 +72,7 @@ class Client(Thread):
             self.connection.sendall(message.encode("UTF-8"))
         except:
             print(">>Error enviando mensaje")
-
-class Room():
-    def __init__(self, name):
-        self.name = name
-        self.clients = []
-    
-    def add_client(self, client):
-        self.clients.append(client)
-    
-    def remove_client(self, client):
-        self.clients.remove(client)
-        #cursor.execute("DELETE FROM users WHERE login = ?", (client.login,))
-        #conn.commit()
-    
-    def broadcast(self, message, sender=None):
-        for client in self.clients:
-            if client != sender:
-                client.send_message(message)
-    
-    def Delete_Room(self, room_name):
-        for room in self.rooms:
-            if room.name == room_name:
-                self.rooms.remove(room)
-                print(f">>Sala '{room_name}' eliminada.")
-                break
-            else:
-                print(f">>No se encontró la sala '{room_name}'.") 
-     
-     
-                
+             
 class Server():
     def __init__(self, **kwargs):
         # Crear un socket del servidor
@@ -143,6 +114,7 @@ class Server():
             client.start()
             serverTime = self.Get_Time()
             client.Client_Send_Msg("Reloj»"+serverTime)
+            client.username = str(clientAddress[1])
             self.rooms[0][2] +=1
             self.clients.append(client) #Se agrega el cliente a una lista
             print(self.clients)
@@ -158,14 +130,14 @@ class Server():
         if command.startswith("#login"):
             if(len(listedData)!=3):
                 client.Client_Send_Msg(f"Mensaje»Servidor»Error en comando")
-                return
+                return True
             self.Login(client)
-            return
+            return True
         #Crear Sala
         if command.startswith("#cR"):
             if(len(listedData)!=2):
                 client.Client_Send_Msg(f"Mensaje»Servidor»Error en comando")
-                return
+                return True
             room_name = listedData[1] # Obtiene el nombre de la sala
             room_exists = False
             i=0
@@ -182,47 +154,55 @@ class Server():
                 client.Client_Send_Msg(f"Entrar Sala»{room_name}»Se ha creado la sala {room_name}")
             client.room = room_name    
             self.rooms[0][2]-=1   
-            return                 
+            return True                 
         # Entrar a sala
         elif command.startswith("#gR"):
             if(len(listedData)!=2):
                 client.Client_Send_Msg(f"Mensaje»Servidor»Error en comando")
-                return
+                return True
             room_name=listedData[1]
             room_exists = False
             i=0
             for room in self.rooms:
-                if room == room_name:
+                if room[0] == room_name:
                     room_exists = True
                     self.rooms[i][2] +=1
-                    self.rooms[0][2]-=1
+                    j=0
+                    for r in self.rooms:
+                        if r[0]==client.room:
+                            self.rooms[j][2]-=1
+                        j+=1
                     client.room = room_name
                     client.Client_Send_Msg(f"Entrar Sala»{room_name}»Se ha unido a la sala {room_name}")       
-                    return
+                    return True
                 i+=1
             client.Client_Send_Msg(f"Mensaje»Servidor»No existe la sala {room_name}")
-            return
+            return True
         #Salir de Sala
         elif(command.startswith("#eR")):
             i=0
             for room in self.rooms:
-                if client.room == room:
+                if client.room == room[0]:
                     self.rooms[i][2]-=1
                     break
                 i+=1
             self.rooms[0][2]+=1
             client.room = "Default"
             client.Client_Send_Msg(f"Salir Sala»Ha salido a la sala principal")
+            return True
         #Salir del Servidor                    
         elif command.startswith("#exit"):
             client.End_Client() # Cerrar el socket del cliente
-            return
+            return True
         #Lista de Nombres de Salas
         elif command.startswith("#lR"):
             client.Client_Send_Msg("Mensaje»Servidor»"+self.List_Rooms())
-            return
+            return True
         #Eliminar Sala
         elif command.startswith('#dR'):
+            if(len(listedData)!=2):
+                client.Client_Send_Msg(f"Mensaje»Servidor»Error en comando")
+                return True
             room_name=listedData[1]
             i=0
             for room in self.rooms:
@@ -233,47 +213,57 @@ class Server():
                         else:
                             client.Client_Send_Msg(f"Mensaje»Servidor»Se ha eliminado la sas {room_name}")
                             self.rooms.remove(i)
+                        return True
+                    client.Client_Send_Msg("Mensaje»Servidor»No se puede eliminar sala, no fue creada por su usuario")
+                    return True
                 i+=1
-            return
+            client.Client_Send_Msg("Mensaje»Servidor»No se puede eliminar sala, no existe")
+            return True
         #Mostrar Usuarios
         elif command.startswith('#show users'):
             msg = self.Show_Users()
             client.Client_Send_Msg("Mensaje»Servidor»"+msg)
-            return
+            return True
         #Mensaje Privado
-        elif command.startswith('\\private'):
-            if(len(listedData)!=2):
+        elif command.startswith('\private'):
+            if(len(listedData)!=3):
                 client.Client_Send_Msg(f"Mensaje»Servidor»Error en comando")
-                return
+                return True
             username = listedData[1]# Extraer el nombre de usuario del mensaje
             recipient = None
-            for client in self.clients: #Encontrar el objeto cliente correspondiente al usuario
-                if client.username == username:
-                    recipient = client
+            for cl in self.clients: #Encontrar el objeto cliente correspondiente al usuario
+                if cl.username == username:
+                    recipient = cl
                     break
             # Verificar si se encontró al usuario
             if recipient:
                 # Enviar mensaje privado al usuario
-                recipient.Client_Send_Msg(f"Privado»{client.username}]»{listedData[2]}")
+                recipient.Client_Send_Msg(f"Privado»{client.username}»{listedData[2]}")
                 client.Client_Send_Msg(f"Mensaje»Servidor»Se ha enviado el mensaje")
             else:
                 client.Client_Send_Msg(f"Mensaje»Servidor»El usuario no existe")
-            return
+            return True
 
     #Funcion para revisar periodicamente si se ha recibido mensaje de algun cliente
     def Check_Client_Messages(self):
         for client in self.clients:
             if not (client.is_alive()):
                 #Revisar si el cliente aun esta conectado, sino se elimina
+                i=0
+                for room in self.rooms:
+                    if client.room == room:
+                        self.rooms[i]-=1
+                        break
+                    i+=1
                 self.clients.remove(client)
-                self.rooms[0][2]-=1
-                #print(self.clients)
                 continue
             if (client.msgReceived):
-                if(self.Check_Command(client)):continue#Revisar si hay un comando
+                if(self.Check_Command(client)):
+                    client.Client_Clear_Msg()
+                    continue#Revisar si hay un comando
                 #Si algun cliente ha recibido mensaje, se agrega a la cola
                 data = f"{client.username}»" + client.message
-                self.q.put([client.room,data])
+                self.q.put([client.room,data,client.username])
                 client.Client_Clear_Msg()
 
     #Funcion para enviar mensajes recibidos a todos los clientes conectados
@@ -288,6 +278,7 @@ class Server():
             try:
                 for client in self.clients:
                     if(client.room != data[0]):continue
+                    if(client.username == data[2]):continue
                     try:
                         client.Client_Send_Msg("Mensaje»"+data[1])#linea para enviar mensajes al cliente
                     except socket.error:
@@ -297,7 +288,9 @@ class Server():
             except:break
     #mostrar todos los usuarios conectados al servidor
     def Show_Users(self):
-        users = [client.username for client in self.clients]
+        users = []
+        for client in self.clients:
+            users.append(client.username)
         msg = ""
         print(">>Usuarios conectados: ")
         for user in users:
@@ -310,7 +303,7 @@ class Server():
     def List_Rooms(self):
         msg=""
         for room in self.rooms:
-            msg = msg + f"Sala: {room[0]}, Usuarlios: {room[2]}, \n"
+            msg = msg + f"Sala: {room[0]}, Usuarios: {room[2]}, \n"
         return msg
     
     def Login(self, client):

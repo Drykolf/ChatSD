@@ -26,7 +26,7 @@ TCP_IP = "127.0.0.1"
 
 TCP_PORT = 8888
 BUFFER_SIZE = 1024
-DEFAULT_ROOM="Sala Principal"
+DEFAULT_ROOM="Default"
 SCREENS =["Login","Register","Chat","Informacion","InformacionBoton"]
 
 class UnconventionalClock():
@@ -124,8 +124,24 @@ class ChatPage(GridLayout):
             if(self.historyLbl.height-5 <= self.historyLbl.layout.height): self.historyLbl.needToScroll = True
             else: self.historyLbl.needToScroll = False
             #socket enviar mensaje
-            chatApp.ServerSocket.sendall(message.encode("UTF-8"))
+            msg = self.Format_Message(message)
+            chatApp.ServerSocket.sendall(msg.encode("UTF-8"))
         Clock.schedule_once(self.Focus_Text_Input,0.1)
+
+    def Format_Message(self,msg):
+        if(msg.startswith("#exit")):
+            chatApp.End_Client()
+        formatedMsg = ""
+        if(msg.startswith("#")):
+            if(msg.startswith("#cR") or msg.startswith("#gR") or msg.startswith("#dR")):
+                listedMsg = msg.split(" ")
+                formatedMsg = f"{listedMsg[0]}»{' '.join(listedMsg[1:])}"
+                return formatedMsg
+        if(msg.startswith("\\private")):
+            listedMsg = msg.split(" ")
+            formatedMsg = f"{listedMsg[0]}»{listedMsg[1]}»{' '.join(listedMsg[2:])}"
+            return formatedMsg
+        else: return msg
 
     def Focus_Text_Input(self, _):
         self.newMessageTxt.focus = True
