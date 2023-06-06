@@ -7,7 +7,9 @@ import sqlite3
 from datetime import datetime
 
 #CONSTANTES
-TCP_IP = '127.0.0.1'
+
+TCP_IP = '192.168.100.117'
+#TCP_IP = '127.0.0.1'
 TCP_PORT = 8888
 BUFFER_SIZE = 1024
 DATABASE = "database/chat.db"

@@ -20,11 +20,11 @@ import queue
 import select
 from datetime import datetime
 from threading import Thread
-
+#source chat_venv/bin/activate
 #chat_venv\Scripts\Activate
 #CONSTANTES
-#TCP_IP = '192.168.86.44'
-TCP_IP = "127.0.0.1"
+TCP_IP = '192.168.100.117'
+#TCP_IP = "127.0.0.1"
 
 TCP_PORT = 8888
 BUFFER_SIZE = 1024
