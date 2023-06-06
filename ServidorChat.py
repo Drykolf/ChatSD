@@ -26,18 +26,7 @@ class Client(Thread):
         self.room_list = []
         self.username = None #Nombre de Usuario
         self.room = "Default"
-    
-    def Leave_Room(self, client):
-        if self.room:
-            self.room.Remove_Client(self)
-            self.room = None
-            self.Client_Send_Msg(">>Has salido de la sala.\n")
-        else:
-            self.Client_Send_Msg(">>No estás en ninguna sala.\n")
-        # Actualizar el campo room_id del usuario en la base de datos a NULL
-        #cursor.execute("UPDATE users SET room_id = NULL WHERE login = ?", (client.login))
-        #conn.commit()
-        
+            
     def run(self):
         self.Client_Connection()
     
@@ -79,31 +68,15 @@ class Server():
         self.serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.serverSocket.bind((TCP_IP, TCP_PORT))
         self.serverSocket.listen()
+        self.Create_Data_Base()#Crear tabla si no existe
         print(">>Servidor escuchando puerto "+str(TCP_PORT)+"...")
         self.q = queue.Queue() #Cola compartida
         self.clients = []
         self.rooms = [["Default","default",0]]
         broadcastThread = Thread(target=self.Broadcast)
         broadcastThread.start()   
-        # Crear conexión a la base de datos
-        self.conn = sqlite3.connect(DATABASE)
-        self.cur = self.conn.cursor()
-        # Crear tabla 'users' si no existe
-        self.cur.execute('''CREATE TABLE IF NOT EXISTS users
-                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        nombres VARCHAR(100),
-                        apellidos VARCHAR(100),
-                        login VARCHAR(100),
-                        password VARCHAR(100),
-                        edad INTEGER,
-                        genero VARCHAR(100))''')
         self.Server_Listen()
-        # Cerrar conexión a la base de datos
-        self.conn.close()
-
-        
-        
-
+    
     def Server_Listen(self):
         while True:
             # Aceptar conexiones entrantes
@@ -114,14 +87,9 @@ class Server():
             client.start()
             serverTime = self.Get_Time()
             client.Client_Send_Msg("Reloj»"+serverTime)
-            client.username = str(clientAddress[1])
             self.rooms[0][2] +=1
             self.clients.append(client) #Se agrega el cliente a una lista
-            print(self.clients)
-            # Insertar información del usuario en la base de datos
-            self.cur.execute("INSERT INTO users (nombres, apellidos, login, password, edad, genero) VALUES (?, ?, ?, ?, ?, ?)",
-               ("name", "last_name", "login", "password", "age", "genero",))
-            self.conn.commit()
+            if(DEBUG):print(self.clients)
             
     def Check_Command(self, client):
         listedData = client.message.split("»")
@@ -132,6 +100,9 @@ class Server():
                 client.Client_Send_Msg(f"Mensaje»Servidor»Error en comando")
                 return True
             self.Login(client)
+            return True
+        if command.startswith("#register"):
+            self.Register(client)
             return True
         #Crear Sala
         if command.startswith("#cR"):
@@ -152,8 +123,12 @@ class Server():
                 self.rooms.append([room_name,client.username,1])
                 print(f"Sala {room_name} creada por {client.username}")
                 client.Client_Send_Msg(f"Entrar Sala»{room_name}»Se ha creado la sala {room_name}")
+            i=0
+            for room in self.rooms:
+                if client.room == room[0]:
+                    self.rooms[i][2]-=1
+                i+=1
             client.room = room_name    
-            self.rooms[0][2]-=1   
             return True                 
         # Entrar a sala
         elif command.startswith("#gR"):
@@ -211,8 +186,8 @@ class Server():
                         if room[2]>0:
                             client.Client_Send_Msg("Mensaje»Servidor»No se puede eliminar sala, no esta vacia")
                         else:
-                            client.Client_Send_Msg(f"Mensaje»Servidor»Se ha eliminado la sas {room_name}")
-                            self.rooms.remove(i)
+                            client.Client_Send_Msg(f"Mensaje»Servidor»Se ha eliminado la sala {room_name}")
+                            self.rooms.remove(room)
                         return True
                     client.Client_Send_Msg("Mensaje»Servidor»No se puede eliminar sala, no fue creada por su usuario")
                     return True
@@ -251,8 +226,8 @@ class Server():
                 #Revisar si el cliente aun esta conectado, sino se elimina
                 i=0
                 for room in self.rooms:
-                    if client.room == room:
-                        self.rooms[i]-=1
+                    if client.room == room[0]:
+                        self.rooms[i][2]-=1
                         break
                     i+=1
                 self.clients.remove(client)
@@ -268,6 +243,8 @@ class Server():
 
     #Funcion para enviar mensajes recibidos a todos los clientes conectados
     def Broadcast(self):
+        self.conn = sqlite3.connect(DATABASE)
+        self.cur = self.conn.cursor()
         while True:
             self.Check_Client_Messages()
             if(self.q.empty()):
@@ -286,6 +263,7 @@ class Server():
                 self.q.task_done()
                 #Se elimina el mensaje ya enviado, de la cola
             except:break
+        self.conn.close()
     #mostrar todos los usuarios conectados al servidor
     def Show_Users(self):
         users = []
@@ -319,7 +297,7 @@ class Server():
                 client.Client_Send_Msg("Login»0»El nombre de usuario ya esta en uso.")
                 return
         # Asignar el nombre de usuario al cliente y enviar un mensaje de confirmación
-        res = self.cur.execute("SELECT login,password FROM users WHERE login=? AND password=?",user,pwd)
+        res = self.cur.execute("SELECT login,password FROM users WHERE login=? AND password=?",(user,pwd,))
         if(res.fetchone() is None):
             client.Client_Send_Msg("Login»0»Credenciales incorrectos")
             return
@@ -327,11 +305,44 @@ class Server():
             client.username = user
             client.Client_Send_Msg("Login»1»Sesion iniciada correctamente")
             return
-        
+    
+    def Register(self,client):
+        listedData = client.message.split("»")
+        names = listedData[1]
+        lastnames = listedData[2]
+        user = listedData[3]
+        password = listedData[4]
+        age = listedData[5]
+        gender = listedData[6]
+        res = self.cur.execute("SELECT login FROM users WHERE login=?",(user,))
+        if(res.fetchone() is not None):
+            client.Client_Send_Msg("Registrar»0»Ya existe una cuenta con ese usuario")
+            return
+        # Insertar información del usuario en la base de datos
+        self.cur.execute("INSERT INTO users (nombres, apellidos, login, password, edad, genero) VALUES (?, ?, ?, ?, ?, ?)",
+            (names, lastnames, user, password, age, gender,))
+        self.conn.commit()
+        client.Client_Send_Msg("Registrar»1»Se ha registrado la cuenta exitosamente")
+
     def Get_Time(self):
         now = datetime.now()
         time = f"{now.hour}»{now.minute}»{now.second}"
         return time
+    
+    def Create_Data_Base(self):
+        # Crear conexión a la base de datos
+        conn = sqlite3.connect(DATABASE)
+        cur = conn.cursor()
+        # Crear tabla 'users' si no existe
+        cur.execute('''CREATE TABLE IF NOT EXISTS users
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        nombres VARCHAR(100),
+                        apellidos VARCHAR(100),
+                        login VARCHAR(100),
+                        password VARCHAR(100),
+                        edad INTEGER,
+                        genero VARCHAR(100))''')
+        conn.close()
 
 if __name__ == '__main__':
     Server()

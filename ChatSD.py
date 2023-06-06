@@ -8,6 +8,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.clock import Clock
 from kivy.properties import DictProperty, ListProperty, StringProperty
+from kivy.uix.dropdown import DropDown
 # to use buttons:
 from kivy.uix.button import Button
 #Conexion
@@ -20,6 +21,7 @@ import select
 from datetime import datetime
 from threading import Thread
 
+#chat_venv\Scripts\Activate
 #CONSTANTES
 #TCP_IP = '192.168.86.44'
 TCP_IP = "127.0.0.1"
@@ -59,7 +61,6 @@ class UnconventionalClock():
     def Get_Time(self):
         return "%02d:%02d:%02d" % (self.hour, self.minute, self.second)
 
-
 class ScrollableLabel(ScrollView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -79,13 +80,11 @@ class ScrollableLabel(ScrollView):
         self.layout.height = self.chatHistory.texture_size[1]+15
         self.chatHistory.height = self.chatHistory.texture_size[1]
         self.chatHistory.text_size = (self.chatHistory.width*0.98,None)
-        if(self.needToScroll):self.scroll_to(self.scrollToPoint)
-        
+        if(self.needToScroll):self.scroll_to(self.scrollToPoint)        
 
 class ChatPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.username = "JBarco"
         self.room = DEFAULT_ROOM
         t = time.localtime()
         self.localTime = time.strftime("%H:%M:%S", t)
@@ -120,7 +119,10 @@ class ChatPage(GridLayout):
         message = self.newMessageTxt.text
         self.newMessageTxt.text = ""
         if message:
-            self.historyLbl.Update_Chat_History(f"[color=dd2020]{self.username}[/color] > {message}")
+            if(message.startswith("#exit")):
+                chatApp.End_Client()
+                return
+            self.historyLbl.Update_Chat_History(f"[color=dd2020]{chatApp.username}[/color] > {message}")
             if(self.historyLbl.height-5 <= self.historyLbl.layout.height): self.historyLbl.needToScroll = True
             else: self.historyLbl.needToScroll = False
             #socket enviar mensaje
@@ -129,8 +131,6 @@ class ChatPage(GridLayout):
         Clock.schedule_once(self.Focus_Text_Input,0.1)
 
     def Format_Message(self,msg):
-        if(msg.startswith("#exit")):
-            chatApp.End_Client()
         formatedMsg = ""
         if(msg.startswith("#")):
             if(msg.startswith("#cR") or msg.startswith("#gR") or msg.startswith("#dR")):
@@ -147,6 +147,7 @@ class ChatPage(GridLayout):
         self.newMessageTxt.focus = True
 
     def Incoming_Message(self, username, message, whisper = False):
+        if(not chatApp.logged):return
         if not whisper:
             self.historyLbl.Update_Chat_History(f"[color=20dd20]{username}[/color] > {message}")
         else:            
@@ -163,7 +164,7 @@ class ChatPage(GridLayout):
         #mostrar mensaje del servidor
         self.historyLbl.Update_Chat_History(message)
         #enviar mensaje de entrada a todos
-        self.historyLbl.Update_Chat_History(f"[color=20dd20]{self.username}[/color] ha entrado a la sala")
+        self.historyLbl.Update_Chat_History(f"[color=20dd20]{chatApp.username}[/color] ha entrado a la sala")
     
     def Delete_Room(self, message, room):
         if(room == self.room):#Si se elimina la sala en la que esta, se sale
@@ -172,10 +173,98 @@ class ChatPage(GridLayout):
             #Mostrar mensaje sala eliminada
             return
 
+class RegisterPage(GridLayout):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cols = 2
+        self.add_widget(Label(text="IP: " + TCP_IP,size_hint_y=.2))
+        self.add_widget(Label(text="Puerto: " + str(TCP_PORT),size_hint_y=.2))
+        
+        self.add_widget(Label(text="Nombres: "))
+        self.nameTxtR = TextInput(multiline=False)
+        self.add_widget(self.nameTxtR)
+        self.add_widget(Label(text="Apellidos: "))
+        self.lastnameTxtR = TextInput(multiline=False)
+        self.add_widget(self.lastnameTxtR)
+        self.add_widget(Label(text="Usuario: "))
+        self.userTxtR = TextInput(multiline=False)
+        self.add_widget(self.userTxtR)
+        self.add_widget(Label(text="Contraseña: "))
+        self.passwordTxtR = TextInput(multiline=False)
+        self.add_widget(self.passwordTxtR)
+        self.add_widget(Label(text="Edad: "))
+        self.ageTxtR = TextInput(multiline=False)
+        self.add_widget(self.ageTxtR)
+        self.add_widget(Label(text="Genero: "))
+        self.genderTxtR = TextInput(multiline=False)
+        self.add_widget(self.genderTxtR)
+        self.registerBtnR = Button(text="Crear Cuenta")
+        self.registerBtnR.bind(on_press=self.Register)
+        self.add_widget(self.registerBtnR)
+        self.signIn = Button(text="Iniciar Sesion")
+        self.signIn.bind(on_press=self.Login)
+        self.add_widget(self.signIn)
+        self.username = chatApp.username
+
+    def Register(self, instance):
+        self.validRegister = False
+        self.registerMessage = ""
+        names = self.nameTxtR.text
+        lastnames = self.lastnameTxtR.text
+        user = self.userTxtR.text
+        password = self.passwordTxtR.text
+        age = self.ageTxtR.text
+        gender = self.genderTxtR.text
+        if(self.Bad_Args(names,lastnames,user,password,age,gender)):
+            chatApp.nextScreen = SCREENS[1]
+            chatApp.infoBtnPage.Update_Info("Error al registrarse, datos invalidos")
+            chatApp.screenManager.current = SCREENS[4]
+        else:
+            data = f"#register»{names}»{lastnames}»{user}»{password}»{age}»{gender}"
+            chatApp.ServerSocket.sendall(data.encode("UTF-8"))
+            sleep(.5)
+            if(self.validRegister):
+                self.Successful_Register()
+            else:
+                self.Unsuccessful_Register(self.registerMessage)
+        return
+    
+    def Bad_Args(self,names,lastnames,user,password,age,gender):
+        if(names.replace(" ", "") == ""):return True
+        if(lastnames.replace(" ", "") == ""):return True
+        if(user.replace(" ", "") == ""):return True
+        if(password.replace(" ", "") == ""):return True
+        if(age.replace(" ", "") == ""):return True
+        if(gender.replace(" ", "") == ""):return True
+        try:
+            int(age)
+            if(int(age)<1 or int(age)>150):return True
+        except:
+            return True
+        return False
+        
+    def Successful_Register(self):
+        chatApp.nextScreen = SCREENS[0]
+        chatApp.infoBtnPage.Update_Info("Se ha registrado exitosamente")
+        chatApp.infoBtnPage.Update_Info("Se ha registrado exitosamente")
+        chatApp.screenManager.current = SCREENS[4]
+        self.validRegister = False
+    
+    def Unsuccessful_Register(self,msg):
+        chatApp.nextScreen = SCREENS[1]
+        chatApp.infoBtnPage.Update_Info(msg)
+        chatApp.screenManager.current = SCREENS[4]
+
+    def Login(self, instance):
+        chatApp.screenManager.current = SCREENS[0]
+    
+    def Set_Message(self,msg):
+        self.registerMessage = msg
 
 class LoginPage(GridLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.logginMessage= ""
         self.cols = 2
         self.add_widget(Label(text="IP: " + TCP_IP))
         self.add_widget(Label(text="Puerto: " + str(TCP_PORT)))
@@ -189,31 +278,44 @@ class LoginPage(GridLayout):
         self.loginBtn.bind(on_press=self.Login)
         self.add_widget(self.loginBtn)
         self.signup = Button(text="Crear Cuenta")
+        self.signup.bind(on_press=self.Register)
         self.add_widget(self.signup)
         self.username = chatApp.username
     
     def Register(self, instance):
-        return
+        chatApp.screenManager.current = SCREENS[1]
+        
     def Login(self, instance):
         self.username = self.userTxt.text
+        login = self.username
         info = f"Intentando iniciar como {self.username}"
         password = self.passwordTxt.text
-        chatApp.ServerSocket.sendall(f"#login»{self.username}»{password}".encode("UTF-8"))
-        print(info)
-        chatApp.infoPage.Update_Info(info)
-        chatApp.screenManager.current = SCREENS[3]
-        self.Connect()
-    
-    def Connect(self): 
-        for i in range(9):
+        if(login.replace(" ", "") != "" and password.replace(" ", "")!= ""):
+            chatApp.ServerSocket.sendall(f"#login»{self.username}»{password}".encode("UTF-8"))
+            sleep(.5)
             if(chatApp.logged):
-                chatApp.nextScreen = SCREENS[2]
-                print("Sesion iniciada")
-                break
-            sleep(1)
-        chatApp.nextScreen = SCREENS[0]
-        chatApp.infoBtnPage.Update_Info("Error al iniciar")
+                self.Successful_Login()
+            else:
+                self.Unsuccessful_Login(self.logginMessage)
+        else:
+            chatApp.nextScreen = SCREENS[0]
+            chatApp.infoBtnPage.Update_Info("Datos incorrectos")
+            
+        print(info)
         chatApp.screenManager.current = SCREENS[4]
+
+    def Successful_Login(self):
+        chatApp.nextScreen = SCREENS[2]
+        chatApp.infoBtnPage.Update_Info("Sesion Iniciada como "+chatApp.username)
+        chatApp.screenManager.current = SCREENS[4]
+    
+    def Unsuccessful_Login(self,msg):
+        chatApp.nextScreen = SCREENS[0]
+        chatApp.infoBtnPage.Update_Info(msg)
+        chatApp.screenManager.current = SCREENS[4]
+    
+    def Set_Message(self,msg):
+        self.logginMessage = msg
             
 class InfoPage(GridLayout):
     def __init__(self, **kwargs):
@@ -229,7 +331,6 @@ class InfoPage(GridLayout):
     def Update_Text_Width(self, *_):
         self.messageLbl.text_size = (self.messageLbl.width*0.9,None)
     
-
 class InfoButtonPage(InfoPage):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -258,6 +359,10 @@ class ChatSD(App):
         screen = Screen(name=SCREENS[0])
         screen.add_widget(self.loginPage)
         self.screenManager.add_widget(screen)
+        self.registerPage = RegisterPage()
+        screen = Screen(name=SCREENS[1])
+        screen.add_widget(self.registerPage)
+        self.screenManager.add_widget(screen)
         self.infoPage = InfoPage()
         screen = Screen(name=SCREENS[3])
         screen.add_widget(self.infoPage)
@@ -276,7 +381,7 @@ class ChatSD(App):
         #Hilo para escuchar servidor
         self.serverThread = threading.Thread(target=self.Listen_Server)
         self.serverThread.start()
-        self.screenManager.current = SCREENS[2]
+        self.screenManager.current = SCREENS[0]
         return self.screenManager
 
     def exit_check(self, *args):
@@ -311,7 +416,7 @@ class ChatSD(App):
                     #self.chatPage.Change_Room("","Prueba")
                     self.Check_Message(data)
                     print(data)
-                except:
+                except Exception as e:
                     self.infoBtnPage.Update_Info("Error: Servidor desconectado"+ 
                                 "\n"+"Saliendo de la aplicacion")
                     self.infoBtnPage.exit = True
@@ -324,22 +429,13 @@ class ChatSD(App):
         listedData = data.split("»")
         command = listedData[0]
         results = ["Login","Mensaje","Entrar Sala","Salir Sala","Eliminar Sala","Desconectar",
-                   "Privado","Reloj"]
-        #register Nombres,Apellidos,Login,Password,Edad,Genero
-        #register Jose,Barco Arias,jbarco,1230,24,Hombre
-        #login usuario contrasena
-        #noLogin»Credenciales incorrectos
-        #Login»Iniciado sesion correctamente
-        #Mensaje»Klisman»HOla como esta
-        #Entrar Sala»Prueba»ha entrado a la sala prueba
-        #Salir Sala»Prueba»Ha salido de la sala
-        #Eliminar Sala»Prueba»Se ha eliminado sala Prueba
-        #Desconectar»Se ha desconectado
-        #Privado»Klisman»Hola como esta
+                   "Privado","Reloj","Registrar"]
         if(command == results[0]):#Login
             if(listedData[1]=="1"):
                 self.logged = True
                 self.username = self.loginPage.username
+            else:
+                self.loginPage.Set_Message(listedData[2])
         elif(command == results[1]):#Mostrar mensaje
             sender = listedData[1]
             message = listedData[2]
@@ -364,6 +460,11 @@ class ChatSD(App):
         elif(command == results[7]):#Reloj
             clockThread = Thread(target=self.Server_Clock,args=listedData[1:])
             clockThread.start()   
+        elif(command == results[8]):#register
+            if(listedData[1]=="1"):
+                self.registerPage.validRegister=True
+            else:
+                self.registerPage.Set_Message(listedData[2])
 
     def Server_Clock(self,hour,min,sec):
         serverClock = UnconventionalClock(hour,min,sec)
